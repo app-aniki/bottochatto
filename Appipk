@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bottochatto - グループチャット</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background-color: #7494c0;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    header {
+      background-color: #273246;
+      color: white;
+      padding: 12px 15px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: bold;
+    }
+    .header-btns {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .small-btn {
+      background-color: #465775;
+      font-size: 0.75rem;
+      padding: 6px 10px;
+      border-radius: 12px;
+      display: none;
+    }
+    /* ログイン画面 */
+    #authContainer {
+      margin: auto;
+      background: white;
+      padding: 25px;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      width: 85%;
+      max-width: 350px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    #authContainer h2 {
+      margin: 0 0 5px 0;
+      color: #273246;
+      text-align: center;
+    }
+    .auth-buttons {
+      display: flex;
+      gap: 10px;
+    }
+    .auth-buttons button {
+      flex: 1;
+    }
+    #registerBtn {
+      background-color: #06c755;
+    }
+    #errorMsg {
+      color: red;
+      font-size: 0.85rem;
+      text-align: center;
+    }
+    /* チャット画面 */
+    #chatContainer {
+      display: none;
+      flex-direction: column;
+      flex: 1;
+      overflow: hidden;
+    }
+    #messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 15px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .msg-row {
+      display: flex;
+      flex-direction: column;
+      max-width: 75%;
+    }
+    .msg-row.mine {
+      align-self: flex-end;
+      align-items: flex-end;
+    }
+    .msg-row.others {
+      align-self: flex-start;
+      align-items: flex-start;
+    }
+    .msg-name {
+      font-size: 0.75rem;
+      color: #ffffff;
+      margin-bottom: 3px;
+      padding: 0 4px;
+    }
+    .msg-bubble {
+      padding: 10px 14px;
+      border-radius: 16px;
+      font-size: 0.95rem;
+      word-wrap: break-word;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    }
+    .msg-row.mine .msg-bubble {
+      background-color: #8de055;
+      color: #111;
+      border-top-right-radius: 4px;
+    }
+    .msg-row.others .msg-bubble {
+      background-color: #ffffff;
+      color: #111;
+      border-top-left-radius: 4px;
+    }
+    #form {
+      display: flex;
+      padding: 10px;
+      background: #ffffff;
+      gap: 8px;
+    }
+    input {
+      padding: 12px;
+      border: 1px solid #ccc;
+      border-radius: 20px;
+      outline: none;
+      font-size: 1rem;
+    }
+    #textInput {
+      flex: 1;
+    }
+    button {
+      background-color: #273246;
+      color: white;
+      border: none;
+      padding: 12px 18px;
+      border-radius: 20px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <span>Bottochatto</span>
+    <div class="header-btns">
+      <button id="changeNameBtn" class="small-btn">名前変更</button>
+      <button id="logoutBtn" class="small-btn">ログアウト</button>
+    </div>
+  </header>
+
+  <!-- ログイン・新規登録画面 -->
+  <div id="authContainer">
+    <h2>Bottochatto 参加</h2>
+    <input type="text" id="nameInput" placeholder="ユーザー名（新規登録時）">
+    <input type="email" id="emailInput" placeholder="メールアドレス" required>
+    <input type="password" id="passwordInput" placeholder="パスワード（6文字以上）" required>
+    <div id="errorMsg"></div>
+    <div class="auth-buttons">
+      <button id="loginBtn">ログイン</button>
+      <button id="registerBtn">新規登録</button>
+    </div>
+  </div>
+
+  <!-- チャット画面 -->
+  <div id="chatContainer">
+    <div id="messages"></div>
+    <form id="form">
+      <input type="text" id="textInput" placeholder="メッセージを入力..." required>
+      <button type="submit">送信</button>
+    </form>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+    import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyD5JCEdNn_mC4OU4sq-xOTutmyoZ6l4-NI",
+      authDomain: "bottochatto-8811d.firebaseapp.com",
+      projectId: "bottochatto-8811d",
+      storageBucket: "bottochatto-8811d.firebasestorage.app",
+      messagingSenderId: "683849965112",
+      appId: "1:683849965112:web:c0462c6e2354bfbed9d0cd"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const messagesRef = collection(db, "messages");
+
+    const authContainer = document.getElementById("authContainer");
+    const chatContainer = document.getElementById("chatContainer");
+    const logoutBtn = document.getElementById("logoutBtn");
+    const changeNameBtn = document.getElementById("changeNameBtn");
+    const nameInput = document.getElementById("nameInput");
+    const emailInput = document.getElementById("emailInput");
+    const passwordInput = document.getElementById("passwordInput");
+    const errorMsg = document.getElementById("errorMsg");
+
+    // 新規登録（ユーザー名も一緒に保存）
+    document.getElementById("registerBtn").addEventListener("click", async () => {
+      errorMsg.textContent = "";
+      const userName = nameInput.value.trim();
+      if (!userName) {
+        errorMsg.textContent = "新規登録するときはユーザー名も入力してね！";
+        return;
+      }
+      try {
+        const userCredential = await createUserWithEmailAndPassword(auth, emailInput.value, passwordInput.value);
+        await updateProfile(userCredential.user, { displayName: userName });
+      } catch (e) {
+        errorMsg.textContent = "登録エラー: メアドの形式かパスワード(6文字以上)を確認してね";
+      }
+    });
+
+    // ログイン
+    document.getElementById("loginBtn").addEventListener("click", async () => {
+      errorMsg.textContent = "";
+      try {
+        await signInWithEmailAndPassword(auth, emailInput.value, passwordInput.value);
+      } catch (e) {
+        errorMsg.textContent = "ログイン失敗: メアドかパスワードが違います";
+      }
+    });
+
+    // 名前変更ボタン
+    changeNameBtn.addEventListener("click", async () => {
+      const user = auth.currentUser;
+      if (!user) return;
+      const newName = prompt("新しいユーザー名を入力してください:", user.displayName || "");
+      if (newName && newName.trim()) {
+        await updateProfile(user, { displayName: newName.trim() });
+        alert("ユーザー名を「" + newName.trim() + "」に変更しました！");
+      }
+    });
+
+    // ログアウト
+    logoutBtn.addEventListener("click", () => signOut(auth));
+
+    // ログイン状態の監視
+    let unsubscribeMessages = null;
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        authContainer.style.display = "none";
+        chatContainer.style.display = "flex";
+        logoutBtn.style.display = "block";
+        changeNameBtn.style.display = "block";
+        startChat(user);
+      } else {
+        authContainer.style.display = "flex";
+        chatContainer.style.display = "none";
+        logoutBtn.style.display = "none";
+        changeNameBtn.style.display = "none";
+        if (unsubscribeMessages) unsubscribeMessages();
+      }
+    });
+
+    // グループチャット処理
+    function startChat(user) {
+      const messagesDiv = document.getElementById("messages");
+      const form = document.getElementById("form");
+      const textInput = document.getElementById("textInput");
+
+      const q = query(messagesRef, orderBy("createdAt", "asc"));
+      unsubscribeMessages = onSnapshot(q, (snapshot) => {
+        messagesDiv.innerHTML = "";
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          const isMine = data.uid === user.uid;
+
+          const row = document.createElement("div");
+          row.className = "msg-row " + (isMine ? "mine" : "others");
+
+          if (!isMine) {
+            const nameEl = document.createElement("div");
+            nameEl.className = "msg-name";
+            nameEl.textContent = data.name || "名無し";
+            row.appendChild(nameEl);
+          }
+
+          const bubbleEl = document.createElement("div");
+          bubbleEl.className = "msg-bubble";
+          bubbleEl.textContent = data.text;
+          row.appendChild(bubbleEl);
+
+          messagesDiv.appendChild(row);
+        });
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+      });
+
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        const text = textInput.value.trim();
+        if (!text) return;
+
+        const currentUser = auth.currentUser;
+        const displayName = currentUser.displayName || currentUser.email.split("@")[0];
+        textInput.value = "";
+
+        await addDoc(messagesRef, {
+          uid: currentUser.uid,
+          name: displayName,
+          text: text,
+          createdAt: serverTimestamp()
+        });
+      };
+    }
+  </script>
+
+</body>
+</html>
