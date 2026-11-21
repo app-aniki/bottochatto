@@ -2,16 +2,22 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Bottochatto - グループチャット</title>
   <style>
-    body {
+    * {
+      box-sizing: border-box;
+    }
+    html, body {
       font-family: sans-serif;
       background-color: #7494c0;
       margin: 0;
+      padding: 0;
+      height: 100%;
+      height: 100dvh;
       display: flex;
       flex-direction: column;
-      height: 100vh;
+      overflow: hidden;
     }
     header {
       background-color: #273246;
@@ -21,6 +27,7 @@
       justify-content: space-between;
       align-items: center;
       font-weight: bold;
+      flex-shrink: 0;
     }
     .header-btns {
       display: flex;
@@ -72,6 +79,7 @@
       display: none;
       flex-direction: column;
       flex: 1;
+      min-height: 0;
       overflow: hidden;
     }
     #messages {
@@ -123,6 +131,7 @@
       padding: 10px;
       background: #ffffff;
       gap: 8px;
+      flex-shrink: 0;
     }
     input {
       padding: 12px;
@@ -133,6 +142,7 @@
     }
     #textInput {
       flex: 1;
+      min-width: 0;
     }
     button {
       background-color: #273246;
@@ -182,15 +192,14 @@
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
     import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-      const firebaseConfig = {
-    apiKey: "AIzaSyBzkxSwy-ExF5A34dZTKxDci3PTtMiqThc",
-    authDomain: "bottochatto-8811d.firebaseapp.com",
-    projectId: "bottochatto-8811d",
-    storageBucket: "bottochatto-8811d.firebasestorage.app",
-    messagingSenderId: "683849965112",
-    appId: "1:683849965112:web:887fe6040ca85bc0d9d0cd"
-  };
-
+    const firebaseConfig = {
+      apiKey: "AIzaSyBzkxSwy-ExF5A34dZTKxDci3PTtMiqThc",
+      authDomain: "bottochatto-8811d.firebaseapp.com",
+      projectId: "bottochatto-8811d",
+      storageBucket: "bottochatto-8811d.firebasestorage.app",
+      messagingSenderId: "683849965112",
+      appId: "1:683849965112:web:887fe6040ca85bc0d9d0cd"
+    };
 
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
@@ -206,7 +215,7 @@
     const passwordInput = document.getElementById("passwordInput");
     const errorMsg = document.getElementById("errorMsg");
 
-    // 新規登録（ユーザー名も一緒に保存）
+    // 新規登録
     document.getElementById("registerBtn").addEventListener("click", async () => {
       errorMsg.textContent = "";
       const userName = nameInput.value.trim();
@@ -295,6 +304,8 @@
           messagesDiv.appendChild(row);
         });
         messagesDiv.scrollTop = messagesDiv.scrollHeight;
+      }, (err) => {
+        messagesDiv.innerHTML = `<div style="color:white; background:rgba(255,0,0,0.7); padding:10px; border-radius:8px;">読み込みエラー: ${err.message}</div>`;
       });
 
       form.onsubmit = async (e) => {
@@ -306,15 +317,18 @@
         const displayName = currentUser.displayName || currentUser.email.split("@")[0];
         textInput.value = "";
 
-        await addDoc(messagesRef, {
-          uid: currentUser.uid,
-          name: displayName,
-          text: text,
-          createdAt: serverTimestamp()
-        });
+        try {
+          await addDoc(messagesRef, {
+            uid: currentUser.uid,
+            name: displayName,
+            text: text,
+            createdAt: serverTimestamp()
+          });
+        } catch (err) {
+          alert("送信エラー: " + err.message);
+        }
       };
     }
   </script>
-
 </body>
 </html>
