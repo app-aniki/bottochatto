@@ -217,7 +217,7 @@
         const userCredential = await createUserWithEmailAndPassword(auth, emailInput.value, passwordInput.value);
         await updateProfile(userCredential.user, { displayName: userName });
       } catch (e) {
-        errorMsg.textContent = "エラー詳細: " + e.code; ";
+        errorMsg.textContent = "エラー詳細: " + e.code;
       }
     });
 
