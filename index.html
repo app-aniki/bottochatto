@@ -29,6 +29,11 @@
       font-weight: bold;
       flex-shrink: 0;
     }
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
     .header-btns {
       display: flex;
       gap: 8px;
@@ -73,6 +78,57 @@
       color: red;
       font-size: 0.85rem;
       text-align: center;
+    }
+    /* グループ一覧画面 */
+    #groupListContainer {
+      display: none;
+      flex-direction: column;
+      flex: 1;
+      padding: 15px;
+      overflow-y: auto;
+      gap: 12px;
+      max-width: 600px;
+      width: 100%;
+      margin: 0 auto;
+    }
+    .create-group-box {
+      background: white;
+      padding: 15px;
+      border-radius: 12px;
+      display: flex;
+      gap: 8px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    }
+    .create-group-box input {
+      flex: 1;
+      min-width: 0;
+    }
+    .create-group-box button {
+      background-color: #06c755;
+      white-space: nowrap;
+    }
+    .group-card {
+      background: white;
+      padding: 16px;
+      border-radius: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    .group-card:active {
+      background-color: #f0f4f8;
+    }
+    .group-title {
+      font-weight: bold;
+      color: #273246;
+      font-size: 1.05rem;
+    }
+    .group-meta {
+      font-size: 0.75rem;
+      color: #666;
+      margin-top: 4px;
     }
     /* チャット画面 */
     #chatContainer {
@@ -158,7 +214,10 @@
 <body>
 
   <header>
-    <span>Bottochatto</span>
+    <div class="header-left">
+      <button id="backBtn" class="small-btn">＜ 戻る</button>
+      <span id="headerTitle">Bottochatto</span>
+    </div>
     <div class="header-btns">
       <button id="changeNameBtn" class="small-btn">名前変更</button>
       <button id="logoutBtn" class="small-btn">ログアウト</button>
@@ -176,6 +235,15 @@
       <button id="loginBtn">ログイン</button>
       <button id="registerBtn">新規登録</button>
     </div>
+  </div>
+
+  <!-- グループ一覧・作成画面 -->
+  <div id="groupListContainer">
+    <div class="create-group-box">
+      <input type="text" id="newGroupInput" placeholder="新しいグループ名を入力...">
+      <button id="createGroupBtn">＋ 作成</button>
+    </div>
+    <div id="groupItems" style="display: flex; flex-direction: column; gap: 10px;"></div>
   </div>
 
   <!-- チャット画面 -->
@@ -204,16 +272,23 @@
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const db = getFirestore(app);
-    const messagesRef = collection(db, "messages");
+    const groupsRef = collection(db, "groups");
 
     const authContainer = document.getElementById("authContainer");
+    const groupListContainer = document.getElementById("groupListContainer");
     const chatContainer = document.getElementById("chatContainer");
+    const backBtn = document.getElementById("backBtn");
+    const headerTitle = document.getElementById("headerTitle");
     const logoutBtn = document.getElementById("logoutBtn");
     const changeNameBtn = document.getElementById("changeNameBtn");
     const nameInput = document.getElementById("nameInput");
     const emailInput = document.getElementById("emailInput");
     const passwordInput = document.getElementById("passwordInput");
     const errorMsg = document.getElementById("errorMsg");
+
+    let currentUser = null;
+    let unsubscribeGroups = null;
+    let unsubscribeMessages = null;
 
     // 新規登録
     document.getElementById("registerBtn").addEventListener("click", async () => {
@@ -241,13 +316,12 @@
       }
     });
 
-    // 名前変更ボタン
+    // 名前変更
     changeNameBtn.addEventListener("click", async () => {
-      const user = auth.currentUser;
-      if (!user) return;
-      const newName = prompt("新しいユーザー名を入力してください:", user.displayName || "");
+      if (!currentUser) return;
+      const newName = prompt("新しいユーザー名を入力してください:", currentUser.displayName || "");
       if (newName && newName.trim()) {
-        await updateProfile(user, { displayName: newName.trim() });
+        await updateProfile(currentUser, { displayName: newName.trim() });
         alert("ユーザー名を「" + newName.trim() + "」に変更しました！");
       }
     });
@@ -255,36 +329,106 @@
     // ログアウト
     logoutBtn.addEventListener("click", () => signOut(auth));
 
-    // ログイン状態の監視
-    let unsubscribeMessages = null;
+    // グループ一覧に戻る
+    backBtn.addEventListener("click", () => {
+      if (unsubscribeMessages) unsubscribeMessages();
+      showGroupList();
+    });
+
+    // 認証状態の監視
     onAuthStateChanged(auth, (user) => {
+      currentUser = user;
       if (user) {
         authContainer.style.display = "none";
-        chatContainer.style.display = "flex";
         logoutBtn.style.display = "block";
         changeNameBtn.style.display = "block";
-        startChat(user);
+        showGroupList();
       } else {
         authContainer.style.display = "flex";
+        groupListContainer.style.display = "none";
         chatContainer.style.display = "none";
+        backBtn.style.display = "none";
         logoutBtn.style.display = "none";
         changeNameBtn.style.display = "none";
+        headerTitle.textContent = "Bottochatto";
+        if (unsubscribeGroups) unsubscribeGroups();
         if (unsubscribeMessages) unsubscribeMessages();
       }
     });
 
-    // グループチャット処理
-    function startChat(user) {
+    // グループ一覧画面の表示とリアルタイム監視
+    function showGroupList() {
+      groupListContainer.style.display = "flex";
+      chatContainer.style.display = "none";
+      backBtn.style.display = "none";
+      headerTitle.textContent = "グループ一覧";
+
+      const groupItems = document.getElementById("groupItems");
+      const q = query(groupsRef, orderBy("createdAt", "desc"));
+
+      if (unsubscribeGroups) unsubscribeGroups();
+      unsubscribeGroups = onSnapshot(q, (snapshot) => {
+        groupItems.innerHTML = "";
+        if (snapshot.empty) {
+          groupItems.innerHTML = `<div style="color:white; text-align:center; padding:20px;">まだグループがありません。上の枠から新しいグループを作成しよう！</div>`;
+          return;
+        }
+        snapshot.forEach((docSnap) => {
+          const group = docSnap.data();
+          const card = document.createElement("div");
+          card.className = "group-card";
+          card.innerHTML = `
+            <div>
+              <div class="group-title">${escapeHtml(group.name)}</div>
+              <div class="group-meta">作成者: ${escapeHtml(group.createdBy || "メンバー")}</div>
+            </div>
+            <div style="color:#06c755; font-weight:bold;">入る ＞</div>
+          `;
+          card.addEventListener("click", () => openGroupChat(docSnap.id, group.name));
+          groupItems.appendChild(card);
+        });
+      });
+    }
+
+    // 新規グループ作成
+    document.getElementById("createGroupBtn").addEventListener("click", async () => {
+      const input = document.getElementById("newGroupInput");
+      const groupName = input.value.trim();
+      if (!groupName || !currentUser) return;
+
+      input.value = "";
+      const creatorName = currentUser.displayName || currentUser.email.split("@")[0];
+      try {
+        const docRef = await addDoc(groupsRef, {
+          name: groupName,
+          createdBy: creatorName,
+          createdAt: serverTimestamp()
+        });
+        openGroupChat(docRef.id, groupName);
+      } catch (err) {
+        alert("グループ作成エラー: " + err.message);
+      }
+    });
+
+    // 選択したグループのチャットを開く
+    function openGroupChat(groupId, groupName) {
+      groupListContainer.style.display = "none";
+      chatContainer.style.display = "flex";
+      backBtn.style.display = "block";
+      headerTitle.textContent = groupName;
+
       const messagesDiv = document.getElementById("messages");
       const form = document.getElementById("form");
       const textInput = document.getElementById("textInput");
+      const groupMessagesRef = collection(db, "groups", groupId, "messages");
 
-      const q = query(messagesRef, orderBy("createdAt", "asc"));
+      if (unsubscribeMessages) unsubscribeMessages();
+      const q = query(groupMessagesRef, orderBy("createdAt", "asc"));
       unsubscribeMessages = onSnapshot(q, (snapshot) => {
         messagesDiv.innerHTML = "";
-        snapshot.forEach((doc) => {
-          const data = doc.data();
-          const isMine = data.uid === user.uid;
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          const isMine = data.uid === currentUser.uid;
 
           const row = document.createElement("div");
           row.className = "msg-row " + (isMine ? "mine" : "others");
@@ -304,8 +448,6 @@
           messagesDiv.appendChild(row);
         });
         messagesDiv.scrollTop = messagesDiv.scrollHeight;
-      }, (err) => {
-        messagesDiv.innerHTML = `<div style="color:white; background:rgba(255,0,0,0.7); padding:10px; border-radius:8px;">読み込みエラー: ${err.message}</div>`;
       });
 
       form.onsubmit = async (e) => {
@@ -313,12 +455,11 @@
         const text = textInput.value.trim();
         if (!text) return;
 
-        const currentUser = auth.currentUser;
         const displayName = currentUser.displayName || currentUser.email.split("@")[0];
         textInput.value = "";
 
         try {
-          await addDoc(messagesRef, {
+          await addDoc(groupMessagesRef, {
             uid: currentUser.uid,
             name: displayName,
             text: text,
@@ -328,6 +469,12 @@
           alert("送信エラー: " + err.message);
         }
       };
+    }
+
+    function escapeHtml(str) {
+      return String(str).replace(/[&<>"']/g, (m) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[m]));
     }
   </script>
 </body>
