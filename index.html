@@ -217,7 +217,7 @@
         const userCredential = await createUserWithEmailAndPassword(auth, emailInput.value, passwordInput.value);
         await updateProfile(userCredential.user, { displayName: userName });
       } catch (e) {
-        errorMsg.textContent = "登録エラー: メアドの形式かパスワード(6文字以上)を確認してね";
+        errorMsg.textContent = "エラー詳細: " + e.code; ";
       }
     });
 
