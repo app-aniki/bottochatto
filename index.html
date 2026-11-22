@@ -28,11 +28,12 @@
       align-items: center;
       font-weight: bold;
       flex-shrink: 0;
+      gap: 8px;
     }
     .header-left {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       min-width: 0;
     }
     #headerTitle {
@@ -42,7 +43,7 @@
     }
     .header-btns {
       display: flex;
-      gap: 6px;
+      gap: 5px;
       align-items: center;
       flex-shrink: 0;
     }
@@ -52,9 +53,16 @@
       padding: 6px 9px;
       border-radius: 12px;
       display: none;
+      white-space: nowrap;
     }
     #showPassBtn {
       background-color: #d35400;
+    }
+    #leaveGroupBtn {
+      background-color: #7f8c8d;
+    }
+    #deleteGroupBtn {
+      background-color: #c0392b;
     }
     /* ログイン画面 */
     #authContainer {
@@ -246,6 +254,8 @@
     </div>
     <div class="header-btns">
       <button id="showPassBtn" class="small-btn">🔑 合言葉</button>
+      <button id="leaveGroupBtn" class="small-btn">🚪 脱退</button>
+      <button id="deleteGroupBtn" class="small-btn">🗑️ 削除</button>
       <button id="changeNameBtn" class="small-btn">名前変更</button>
       <button id="logoutBtn" class="small-btn">ログアウト</button>
     </div>
@@ -288,10 +298,7 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-    import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-
-    // ★ここにコピーしたDiscordのウェブフックURLを貼り付ける
-    const DISCORD_WEBHOOK_URL = "ここにDiscordのウェブフックURLを貼る";
+    import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, doc, deleteDoc, getDocs } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyBzkxSwy-ExF5A34dZTKxDci3PTtMiqThc",
@@ -312,6 +319,8 @@
     const chatContainer = document.getElementById("chatContainer");
     const backBtn = document.getElementById("backBtn");
     const showPassBtn = document.getElementById("showPassBtn");
+    const leaveGroupBtn = document.getElementById("leaveGroupBtn");
+    const deleteGroupBtn = document.getElementById("deleteGroupBtn");
     const headerTitle = document.getElementById("headerTitle");
     const logoutBtn = document.getElementById("logoutBtn");
     const changeNameBtn = document.getElementById("changeNameBtn");
@@ -321,26 +330,12 @@
     const errorMsg = document.getElementById("errorMsg");
 
     let currentUser = null;
+    let currentGroupId = null;
+    let currentGroupName = "";
     let currentGroupPass = "";
     let unsubscribeGroups = null;
     let unsubscribeMessages = null;
     const unlockedGroups = new Set();
-
-    // Discordへログを送信する関数
-    async function sendDiscordLog(groupName, userName, uid, text) {
-      if (!DISCORD_WEBHOOK_URL || !DISCORD_WEBHOOK_URL.startsWith("http")) return;
-      try {
-        await fetch(DISCORD_WEBHOOK_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            content: `💬 **[${groupName}]** ${userName} (\`${uid}\`)\n> ${text}`
-          })
-        });
-      } catch (e) {
-        console.error("Discordログ送信エラー:", e);
-      }
-    }
 
     // 新規登録
     document.getElementById("registerBtn").addEventListener("click", async () => {
@@ -387,6 +382,50 @@
       }
     });
 
+    // グループ脱退ボタン
+    leaveGroupBtn.addEventListener("click", async () => {
+      if (!currentGroupId || !currentUser) return;
+      if (!confirm(`「${currentGroupName}」から脱退しますか？`)) return;
+
+      const displayName = currentUser.displayName || currentUser.email.split("@")[0];
+      try {
+        await addDoc(collection(db, "groups", currentGroupId, "messages"), {
+          uid: "system",
+          name: "システム",
+          text: `${displayName} さんがグループから脱退しました`,
+          createdAt: serverTimestamp()
+        });
+      } catch (e) {
+        console.error(e);
+      }
+
+      unlockedGroups.delete(currentGroupId);
+      if (unsubscribeMessages) unsubscribeMessages();
+      showGroupList();
+    });
+
+    // グループ削除ボタン（作成者のみ）
+    deleteGroupBtn.addEventListener("click", async () => {
+      if (!currentGroupId) return;
+      if (!confirm(`「${currentGroupName}」を完全に削除しますか？\n※中のメッセージもすべて消えて元に戻せません。`)) return;
+
+      try {
+        // グループ内のメッセージを先に削除
+        const msgsSnap = await getDocs(collection(db, "groups", currentGroupId, "messages"));
+        for (const msgDoc of msgsSnap.docs) {
+          await deleteDoc(msgDoc.ref);
+        }
+        // グループ本体を削除
+        await deleteDoc(doc(db, "groups", currentGroupId));
+        unlockedGroups.delete(currentGroupId);
+        if (unsubscribeMessages) unsubscribeMessages();
+        alert("グループを削除しました。");
+        showGroupList();
+      } catch (err) {
+        alert("グループ削除エラー: " + err.message);
+      }
+    });
+
     // ログアウト
     logoutBtn.addEventListener("click", () => signOut(auth));
 
@@ -410,6 +449,8 @@
         chatContainer.style.display = "none";
         backBtn.style.display = "none";
         showPassBtn.style.display = "none";
+        leaveGroupBtn.style.display = "none";
+        deleteGroupBtn.style.display = "none";
         logoutBtn.style.display = "none";
         changeNameBtn.style.display = "none";
         headerTitle.textContent = "Bottochatto";
@@ -420,10 +461,13 @@
 
     // グループ一覧画面の表示
     function showGroupList() {
+      currentGroupId = null;
       groupListContainer.style.display = "flex";
       chatContainer.style.display = "none";
       backBtn.style.display = "none";
       showPassBtn.style.display = "none";
+      leaveGroupBtn.style.display = "none";
+      deleteGroupBtn.style.display = "none";
       headerTitle.textContent = "グループ一覧";
 
       const groupItems = document.getElementById("groupItems");
@@ -440,6 +484,7 @@
           const group = docSnap.data();
           const pass = (group.passcode || "").trim();
           const hasPass = pass !== "";
+          const isCreator = group.creatorUid === currentUser.uid;
           const card = document.createElement("div");
           card.className = "group-card";
           card.innerHTML = `
@@ -448,12 +493,12 @@
                 <span>${escapeHtml(group.name)}</span>
                 ${hasPass ? `<span class="lock-badge">🔒 鍵付き</span>` : ""}
               </div>
-              <div class="group-meta">作成者: ${escapeHtml(group.createdBy || "メンバー")}</div>
+              <div class="group-meta">作成者: ${escapeHtml(group.createdBy || "メンバー")}${isCreator ? "（あなた）" : ""}</div>
             </div>
             <div style="color:#06c755; font-weight:bold;">入る ＞</div>
           `;
           card.addEventListener("click", () => {
-            if (hasPass && group.creatorUid !== currentUser.uid && !unlockedGroups.has(docSnap.id)) {
+            if (hasPass && !isCreator && !unlockedGroups.has(docSnap.id)) {
               const inputPass = prompt(`「${group.name}」の合言葉を入力してください:`);
               if (inputPass === null) return;
               if (inputPass.trim() !== pass) {
@@ -462,7 +507,7 @@
               }
               unlockedGroups.add(docSnap.id);
             }
-            openGroupChat(docSnap.id, group.name, pass);
+            openGroupChat(docSnap.id, group.name, pass, isCreator);
           });
           groupItems.appendChild(card);
         });
@@ -489,20 +534,25 @@
           createdAt: serverTimestamp()
         });
         unlockedGroups.add(docRef.id);
-        openGroupChat(docRef.id, groupName, passcode);
+        openGroupChat(docRef.id, groupName, passcode, true);
       } catch (err) {
         alert("グループ作成エラー: " + err.message);
       }
     });
 
     // 選択したグループのチャットを開く
-    function openGroupChat(groupId, groupName, passcode = "") {
+    function openGroupChat(groupId, groupName, passcode = "", isCreator = false) {
+      currentGroupId = groupId;
+      currentGroupName = groupName;
+      currentGroupPass = passcode;
+
       groupListContainer.style.display = "none";
       chatContainer.style.display = "flex";
       backBtn.style.display = "block";
       headerTitle.textContent = groupName;
-      currentGroupPass = passcode;
       showPassBtn.style.display = passcode ? "block" : "none";
+      leaveGroupBtn.style.display = isCreator ? "none" : "block";
+      deleteGroupBtn.style.display = isCreator ? "block" : "none";
 
       const messagesDiv = document.getElementById("messages");
       const form = document.getElementById("form");
@@ -515,8 +565,17 @@
         messagesDiv.innerHTML = "";
         snapshot.forEach((docSnap) => {
           const data = docSnap.data();
-          const isMine = data.uid === currentUser.uid;
 
+          // システム通知（脱退など）
+          if (data.uid === "system") {
+            const sysEl = document.createElement("div");
+            sysEl.style.cssText = "align-self:center; background:rgba(0,0,0,0.25); color:white; font-size:0.75rem; padding:4px 12px; border-radius:12px;";
+            sysEl.textContent = data.text;
+            messagesDiv.appendChild(sysEl);
+            return;
+          }
+
+          const isMine = data.uid === currentUser.uid;
           const row = document.createElement("div");
           row.className = "msg-row " + (isMine ? "mine" : "others");
 
@@ -552,8 +611,6 @@
             text: text,
             createdAt: serverTimestamp()
           });
-          // Discordへログ送信
-          sendDiscordLog(groupName, displayName, currentUser.uid, text);
         } catch (err) {
           alert("送信エラー: " + err.message);
         }
