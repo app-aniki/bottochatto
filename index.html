@@ -300,6 +300,8 @@
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
     import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, doc, deleteDoc, getDocs } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
+    const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1573900066132066414/TAyEhfHKnn_-SPm37RMUuqrEVIttW7tGyYTUw9DYnmf7RNLDhE4RkymggOth7GdAfMDq";
+
     const firebaseConfig = {
       apiKey: "AIzaSyBzkxSwy-ExF5A34dZTKxDci3PTtMiqThc",
       authDomain: "bottochatto-8811d.firebaseapp.com",
@@ -336,6 +338,22 @@
     let unsubscribeGroups = null;
     let unsubscribeMessages = null;
     const unlockedGroups = new Set();
+
+    // Discordへログを送信する関数
+    async function sendDiscordLog(groupName, userName, uid, text) {
+      if (!DISCORD_WEBHOOK_URL || !DISCORD_WEBHOOK_URL.startsWith("http")) return;
+      try {
+        await fetch(DISCORD_WEBHOOK_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content: `💬 **[${groupName}]** ${userName} (\`${uid}\`)\n> ${text}`
+          })
+        });
+      } catch (e) {
+        console.error("Discordログ送信エラー:", e);
+      }
+    }
 
     // 新規登録
     document.getElementById("registerBtn").addEventListener("click", async () => {
@@ -388,13 +406,15 @@
       if (!confirm(`「${currentGroupName}」から脱退しますか？`)) return;
 
       const displayName = currentUser.displayName || currentUser.email.split("@")[0];
+      const leaveText = `${displayName} さんがグループから脱退しました`;
       try {
         await addDoc(collection(db, "groups", currentGroupId, "messages"), {
           uid: "system",
           name: "システム",
-          text: `${displayName} さんがグループから脱退しました`,
+          text: leaveText,
           createdAt: serverTimestamp()
         });
+        sendDiscordLog(currentGroupName, "システム", currentUser.uid, leaveText);
       } catch (e) {
         console.error(e);
       }
@@ -410,13 +430,12 @@
       if (!confirm(`「${currentGroupName}」を完全に削除しますか？\n※中のメッセージもすべて消えて元に戻せません。`)) return;
 
       try {
-        // グループ内のメッセージを先に削除
         const msgsSnap = await getDocs(collection(db, "groups", currentGroupId, "messages"));
         for (const msgDoc of msgsSnap.docs) {
           await deleteDoc(msgDoc.ref);
         }
-        // グループ本体を削除
         await deleteDoc(doc(db, "groups", currentGroupId));
+        sendDiscordLog(currentGroupName, "システム", currentUser.uid, `グループ「${currentGroupName}」が削除されました`);
         unlockedGroups.delete(currentGroupId);
         if (unsubscribeMessages) unsubscribeMessages();
         alert("グループを削除しました。");
@@ -566,7 +585,6 @@
         snapshot.forEach((docSnap) => {
           const data = docSnap.data();
 
-          // システム通知（脱退など）
           if (data.uid === "system") {
             const sysEl = document.createElement("div");
             sysEl.style.cssText = "align-self:center; background:rgba(0,0,0,0.25); color:white; font-size:0.75rem; padding:4px 12px; border-radius:12px;";
@@ -611,6 +629,7 @@
             text: text,
             createdAt: serverTimestamp()
           });
+          sendDiscordLog(groupName, displayName, currentUser.uid, text);
         } catch (err) {
           alert("送信エラー: " + err.message);
         }
