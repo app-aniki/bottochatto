@@ -33,18 +33,28 @@
       display: flex;
       align-items: center;
       gap: 10px;
+      min-width: 0;
+    }
+    #headerTitle {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .header-btns {
       display: flex;
-      gap: 8px;
+      gap: 6px;
       align-items: center;
+      flex-shrink: 0;
     }
     .small-btn {
       background-color: #465775;
-      font-size: 0.75rem;
-      padding: 6px 10px;
+      font-size: 0.72rem;
+      padding: 6px 9px;
       border-radius: 12px;
       display: none;
+    }
+    #showPassBtn {
+      background-color: #d35400;
     }
     /* ログイン画面 */
     #authContainer {
@@ -235,6 +245,7 @@
       <span id="headerTitle">Bottochatto</span>
     </div>
     <div class="header-btns">
+      <button id="showPassBtn" class="small-btn">🔑 合言葉</button>
       <button id="changeNameBtn" class="small-btn">名前変更</button>
       <button id="logoutBtn" class="small-btn">ログアウト</button>
     </div>
@@ -279,6 +290,9 @@
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
     import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
+    // ★ここにコピーしたDiscordのウェブフックURLを貼り付ける
+    const DISCORD_WEBHOOK_URL = "ここにDiscordのウェブフックURLを貼る";
+
     const firebaseConfig = {
       apiKey: "AIzaSyBzkxSwy-ExF5A34dZTKxDci3PTtMiqThc",
       authDomain: "bottochatto-8811d.firebaseapp.com",
@@ -297,6 +311,7 @@
     const groupListContainer = document.getElementById("groupListContainer");
     const chatContainer = document.getElementById("chatContainer");
     const backBtn = document.getElementById("backBtn");
+    const showPassBtn = document.getElementById("showPassBtn");
     const headerTitle = document.getElementById("headerTitle");
     const logoutBtn = document.getElementById("logoutBtn");
     const changeNameBtn = document.getElementById("changeNameBtn");
@@ -306,10 +321,26 @@
     const errorMsg = document.getElementById("errorMsg");
 
     let currentUser = null;
+    let currentGroupPass = "";
     let unsubscribeGroups = null;
     let unsubscribeMessages = null;
-    // 一度合言葉を入力して入ったグループを記憶する
     const unlockedGroups = new Set();
+
+    // Discordへログを送信する関数
+    async function sendDiscordLog(groupName, userName, uid, text) {
+      if (!DISCORD_WEBHOOK_URL || !DISCORD_WEBHOOK_URL.startsWith("http")) return;
+      try {
+        await fetch(DISCORD_WEBHOOK_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content: `💬 **[${groupName}]** ${userName} (\`${uid}\`)\n> ${text}`
+          })
+        });
+      } catch (e) {
+        console.error("Discordログ送信エラー:", e);
+      }
+    }
 
     // 新規登録
     document.getElementById("registerBtn").addEventListener("click", async () => {
@@ -347,6 +378,15 @@
       }
     });
 
+    // 合言葉確認ボタン
+    showPassBtn.addEventListener("click", () => {
+      if (currentGroupPass) {
+        alert(`このグループの合言葉は：\n\n「 ${currentGroupPass} 」\n\n招待したいメンバーに教えてあげよう！`);
+      } else {
+        alert("このグループには合言葉が設定されていません（誰でも参加できます）。");
+      }
+    });
+
     // ログアウト
     logoutBtn.addEventListener("click", () => signOut(auth));
 
@@ -369,6 +409,7 @@
         groupListContainer.style.display = "none";
         chatContainer.style.display = "none";
         backBtn.style.display = "none";
+        showPassBtn.style.display = "none";
         logoutBtn.style.display = "none";
         changeNameBtn.style.display = "none";
         headerTitle.textContent = "Bottochatto";
@@ -382,6 +423,7 @@
       groupListContainer.style.display = "flex";
       chatContainer.style.display = "none";
       backBtn.style.display = "none";
+      showPassBtn.style.display = "none";
       headerTitle.textContent = "グループ一覧";
 
       const groupItems = document.getElementById("groupItems");
@@ -396,7 +438,8 @@
         }
         snapshot.forEach((docSnap) => {
           const group = docSnap.data();
-          const hasPass = Boolean(group.passcode && group.passcode.trim() !== "");
+          const pass = (group.passcode || "").trim();
+          const hasPass = pass !== "";
           const card = document.createElement("div");
           card.className = "group-card";
           card.innerHTML = `
@@ -410,17 +453,16 @@
             <div style="color:#06c755; font-weight:bold;">入る ＞</div>
           `;
           card.addEventListener("click", () => {
-            // 合言葉がある場合はチェック（作成者または解除済みならスルー）
             if (hasPass && group.creatorUid !== currentUser.uid && !unlockedGroups.has(docSnap.id)) {
               const inputPass = prompt(`「${group.name}」の合言葉を入力してください:`);
-              if (inputPass === null) return; // キャンセル
-              if (inputPass.trim() !== group.passcode.trim()) {
+              if (inputPass === null) return;
+              if (inputPass.trim() !== pass) {
                 alert("合言葉が違います！");
                 return;
               }
               unlockedGroups.add(docSnap.id);
             }
-            openGroupChat(docSnap.id, group.name);
+            openGroupChat(docSnap.id, group.name, pass);
           });
           groupItems.appendChild(card);
         });
@@ -447,18 +489,20 @@
           createdAt: serverTimestamp()
         });
         unlockedGroups.add(docRef.id);
-        openGroupChat(docRef.id, groupName);
+        openGroupChat(docRef.id, groupName, passcode);
       } catch (err) {
         alert("グループ作成エラー: " + err.message);
       }
     });
 
     // 選択したグループのチャットを開く
-    function openGroupChat(groupId, groupName) {
+    function openGroupChat(groupId, groupName, passcode = "") {
       groupListContainer.style.display = "none";
       chatContainer.style.display = "flex";
       backBtn.style.display = "block";
       headerTitle.textContent = groupName;
+      currentGroupPass = passcode;
+      showPassBtn.style.display = passcode ? "block" : "none";
 
       const messagesDiv = document.getElementById("messages");
       const form = document.getElementById("form");
@@ -508,6 +552,8 @@
             text: text,
             createdAt: serverTimestamp()
           });
+          // Discordへログ送信
+          sendDiscordLog(groupName, displayName, currentUser.uid, text);
         } catch (err) {
           alert("送信エラー: " + err.message);
         }
